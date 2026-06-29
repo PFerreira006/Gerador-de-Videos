@@ -202,10 +202,17 @@ def baixar_videos_fundo(keyword, nome_seguro, n=3):
     return ficheiros
 
 
+# Lista global para rastrear clips de fundo abertos e fechá-los depois
+_clips_fundo_abertos = []
+
 def construir_fundo(ficheiros, duracao_total):
+    global _clips_fundo_abertos
+    _clips_fundo_abertos = []   # reset para cada vídeo
+
     clips = []
     for f in ficheiros:
         c = VideoFileClip(f)
+        _clips_fundo_abertos.append(c)   # guardar referência para fechar depois
         dur_segura = max(c.duration - 0.15, 1.0)
         clips.append(c.subclipped(0, dur_segura))
 
@@ -369,31 +376,39 @@ def aplicar_legendas_ffmpeg(video_sem_leg, arquivo_final, blocos, fonte):
 # ──────────────────────────────────────────────
 
 def fechar_e_limpar(clips_para_fechar, ficheiros_para_apagar):
-    # 1. Fechar todos os clips
-    for clip in clips_para_fechar:
+    global _clips_fundo_abertos
+
+    # 1. Fechar clips compostos (fundo, audio, final)
+    todos_os_clips = clips_para_fechar + _clips_fundo_abertos
+    for clip in todos_os_clips:
         try:
             if clip is not None:
                 clip.close()
         except Exception:
             pass
+    _clips_fundo_abertos = []
 
-    # 2. Forçar garbage collection para largar handles do ffmpeg
+    # 2. Forçar garbage collection — liberta handles do ffmpeg/Windows
     gc.collect()
-    time.sleep(2)
+    time.sleep(3)
 
-    # 3. Tentar apagar até 5 vezes com espera entre tentativas
+    # 3. Tentar apagar cada ficheiro até 8 vezes (Windows pode demorar a largar)
     for f in ficheiros_para_apagar:
-        for tentativa in range(5):
+        apagado = False
+        for tentativa in range(8):
             try:
                 if os.path.exists(f):
                     os.remove(f)
-                    print(f"   🗑️  Apagado: {f}")
+                print(f"   Apagado: {f}")
+                apagado = True
                 break
+            except PermissionError:
+                if tentativa < 7:
+                    time.sleep(1.5)
             except Exception:
-                if tentativa < 4:
-                    time.sleep(1)
-                else:
-                    print(f"   ⚠️  Não apagado '{f}' — apaga manualmente")
+                break
+        if not apagado and os.path.exists(f):
+            print(f"   Nao foi possivel apagar '{f}' — podes apagar manualmente")
 
 
 # ──────────────────────────────────────────────
